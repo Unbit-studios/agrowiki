@@ -1,0 +1,255 @@
+import telebot
+from telebot import types
+import os
+from uuid import uuid4
+from cvbbot import *
+from roboflow import Roboflow
+import pandas as pd 
+import cv2 
+import csv
+from ultralytics import YOLO
+
+bot = telebot.TeleBot('6759123116:AAHJWAPL5pl4bJf_lCBAJsyAefJfHgHqA8I')
+
+
+rf = Roboflow(api_key="kACovgXsfqfPRnZZuqtL")
+project = rf.workspace().project("plants-diseases-detection-and-classification")
+model = project.version(12).model
+
+plmodel = YOLO("content/best.pt")   
+
+trans_dataframe = pd.read_csv('content/trans_dataframe.csv')
+trans_dataframe = trans_dataframe.rename({'eng': 'class'}, axis =1)
+
+bot = telebot.TeleBot('6759123116:AAHJWAPL5pl4bJf_lCBAJsyAefJfHgHqA8I')
+csv_file_path = 'plants_data.csv'
+UPLOADS_DIR = 'uploads'
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+user_language = {}
+
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = message.from_user.id
+    lang = user_language.get(user_id, 'uz')  # Default language is Uzbek
+    greeting = {
+        'uz': """Telegram botingiz uchun salom:
+
+AgroBot-ga xush kelibsiz - qishloq xo'jaligi olamidagi yordamchingiz! 🌾🤖
+
+Biz ushbu botni agronomlar va fermerlar uchun o'simliklarni fotosuratlardan tanib olish jarayonlarini osonlashtirish uchun ishlab chiqdik. Shunchaki o‘simlik, sabzavot yoki meva suratini yuboring va AgroBot sizga turi, parvarishlash xususiyatlari, ekish mavsumi va boshqa ko‘p narsalar haqida qimmatli ma’lumotlarni taqdim etadi.
+
+Biz sizning agronomiya tajribangizni yanada samarali va ma'lumotli qilishga intilamiz. Hosildorlikni oshirish, o'simliklaringizga to'g'ri g'amxo'rlik qilish va professional tajribangizni oshirish uchun AgroBot-dan foydalaning.
+
+Surat yuboring va boshlaymiz! 🌱📸""",
+        'ru': """Приветствие для вашего телеграм-бота:
+
+Добро пожаловать в AgroBot – вашего помощника в мире сельского хозяйства! 🌾🤖
+
+Мы разработали этого бота для агрономов и фермеров, чтобы облегчить процессы узнавания растений по фотографиям. Просто отправьте фото растения, овоща или фрукта, и AgroBot предоставит вам ценную информацию о виде, особенностях ухода, сезоне посадки, и многое другое.
+
+Мы стремимся сделать ваш опыт в области агрономии более эффективным и информативным. Пользуйтесь AgroBot для улучшения урожаев, правильного ухода за растениями и максимизации вашего профессионального опыта.
+
+Отправьте фото и начнем! 🌱📸""",
+        'en': """Greetings for your telegram bot:
+
+Welcome to AgroBot - your assistant in the world of agriculture! 🌾🤖
+
+We developed this bot for agronomists and farmers to facilitate the processes of recognizing plants from photographs. Just send a photo of a plant, vegetable or fruit, and AgroBot will provide you with valuable information about the type, care features, planting season, and much more.
+
+We strive to make your agronomy experience more efficient and informative. Use AgroBot to improve your yields, properly care for your plants, and maximize your professional experience.
+
+Send a photo and let's get started! 🌱📸"""
+    }
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("🇺🇿 O'zbekcha"), types.KeyboardButton("🇷🇺 Русский"), types.KeyboardButton("🇬🇧 English"))
+    bot.send_message(user_id, greeting[lang], reply_markup=markup)
+    bot.send_message(user_id, "Tilni o'zgartirish uchun /language ni bosing")
+
+# Command /language
+@bot.message_handler(commands=['language'])
+def set_language(message):
+    user_id = message.from_user.id
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("🇺🇿 O'zbekcha"), types.KeyboardButton("🇷🇺 Русский"), types.KeyboardButton("🇬🇧 English"))
+    bot.send_message(user_id, "Tilni tanlang:", reply_markup=markup)
+
+# Handling language selection
+@bot.message_handler(func=lambda message: message.text in ["🇺🇿 O'zbekcha", "🇷🇺 Русский", "🇬🇧 English"])
+def handle_language(message):
+    user_id = message.from_user.id
+    lang_map = {
+        "🇺🇿 O'zbekcha": "uz",
+        "🇷🇺 Русский": "ru",
+        "🇬🇧 English": "en"
+    }
+    user_language[user_id] = lang_map[message.text]
+    bot.send_message(user_id, f"Til tanlandi {user_language[user_id]}.")
+
+
+
+
+def load_user_language():
+    user_language = {}
+    try:
+        with open('user_language.csv', 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                user_language[int(row['user_id'])] = row['language']
+    except FileNotFoundError:
+        pass  # Если файл не существует, проигнорировать
+    return user_language
+
+def save_user_language(user_language):
+    with open('user_language.csv', 'w', newline='') as csvfile:
+        fieldnames = ['user_id', 'language']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for user_id, language in user_language.items():
+            writer.writerow({'user_id': user_id, 'language': language})
+
+
+user_language = load_user_language()
+# Command /menu
+@bot.message_handler(commands=['menu'])
+def show_menu(message):
+    user_id = message.from_user.id
+    lang = user_language.get(user_id, 'uz')
+    commands = {
+        'uz': "Mavjud buyruqlar:\n/start\n/language <code>\n/menu\n/change_answer",
+        'ru': "Доступные команды:\n/start\n/language <code>\n/menu\n/change_answer",
+        'en': "Available commands:\n/start\n/language <code>\n/menu\n/change_answer"
+    }
+    bot.send_message(user_id, commands[lang])
+
+admin_id = '5820396047'
+@bot.message_handler(commands=['change_answer'])
+def send_to_admin(message):
+    user_id = message.from_user.id
+    user_text = message.text.replace("/change_answer", "").strip()
+
+    if user_text:
+        admin_text = f"Message from user {user_id}:\n\n{user_text}"
+        bot.send_message(admin_id, admin_text)
+        bot.send_message(user_id, "Sizning xabaringiz adminga jo'natildi")
+    else:
+        bot.send_message(user_id, "Sizning xabaringiz adminga jonatilmadi")
+
+umessage = {
+        'uz': "Uddalandi",
+        'ru': "Успешно",
+        'en': "Successfully"
+    }
+    
+infomessage = {
+        'uz': "Ma'lumotlar yuklanmoqda...",
+        'ru': "Загружается...",
+        'en': "Loading..."
+    }
+
+def predict_plants(model, image_path):
+  # Perform inference
+  results = model.predict(image_path)[0]
+  # visualize your prediction
+  pred: list = []
+  for i in results.boxes.cls:
+    p = results.names[int(i)]
+    if p not in pred:
+      pred.append(p)
+
+  if len(pred) == 0:
+    return None
+  else:
+    return pred
+
+def get_predicitions(image_path, leng = 'uzb'):
+  global model
+  global plmodel
+  global trans_dataframe
+
+  pred = predict_leaves(model, image_path)
+
+  pred = pred_to_pandas(pred)
+  pred = preprocess_dataframe(pred, trans_dataframe)
+
+  plpred = predict_plants(plmodel, image_path)
+  if (plpred == None) == True and (len(list(pred)) == 0) == True:
+    return 'nothing detected'
+  else:
+    if plpred == None: 
+      draw_labels(pred, leng = leng, show = False)
+      print('predicted no plants')
+      return [], [i for i in pred['disease_eng'].unique() if i != 'None']
+
+    elif len(list(pred)) == 0: 
+      return plpred, []
+    
+    else: 
+      draw_labels(pred, leng = leng, show = False)
+      print('predicted sucesfully')
+      return plpred, [i for i in pred['disease_eng'].unique() if i != 'None']
+
+def get_info(pl_names, foldern, message):
+  # Get all file names in the folder
+    try:
+      plfile_names = [f for f in os.listdir(foldern) if os.path.isfile(os.path.join(foldern, f))]
+
+      texts : list = []
+      for pl in pl_names:
+        print(pl)
+        for fn in plfile_names:
+
+          if pl.lower()[:4] in fn.lower():
+
+            text = open(f'{foldern}/{fn}', 'r', encoding='utf-8').read()
+            texts.append(text)
+            print("text found:")
+            bot.send_message(message.chat.id, text)
+      return texts
+    except:
+        pass
+
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    global model
+    user_id = message.from_user.id
+    lang = user_language.get(user_id, 'uz')
+    file_id = message.photo[-1].file_id
+    file_info = bot.get_file(file_id)
+    file_path = file_info.file_path
+    bot.send_message(user_id, infomessage[lang])
+
+    # Generate a unique filename
+    unique_filename = str(uuid4())
+    file_extension = os.path.splitext(file_path)[1]
+    filename = f"{unique_filename}{file_extension}"
+
+    # Save the file
+    downloaded_file = bot.download_file(file_path)
+    with open(os.path.join(UPLOADS_DIR, filename), 'wb') as new_file:
+        new_file.write(downloaded_file)
+    try:
+        seed = get_predicitions(f'uploads/{unique_filename}{file_extension}')
+
+        if seed == 'nothing detected':
+            bot.send_message(message.chat.id, "Yanabir bor urinib ko'ring!")
+        else:
+            names , diseases = seed
+            
+            plants_inst = get_info(names, 'plants_info', message)
+            deasease_inst = get_info(diseases, 'desease_info', message)
+
+            # Send the image back to the user
+            with open(f'uploads/{unique_filename}{file_extension}', 'rb') as photo:
+                bot.send_photo(user_id, photo)
+    except:
+        bot.send_message(message.chat.id, "Ma'lumot topilmadi!")
+
+def search_plant_info(name, disease):
+    # Search for values based on the "name" and "disease" columns
+    result = plants_data[(plants_data['name'] == name) & (plants_data['disease'] == disease)]
+
+
+# Run the bot
+bot.polling(none_stop=True)
